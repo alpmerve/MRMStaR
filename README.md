@@ -1,2 +1,2 @@
 # MRMStaR
-Custom-made script for Skyline MRM data output to perform second level of normalization and group comparison
+Custom-made R script for MRM data which processed in Skyline to perform second level normalization and group comparison

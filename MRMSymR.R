@@ -103,7 +103,7 @@ peakSym_table    <- peakSym_table %>%
 
 ## Export results in txt file
 
-write.table( peakSym_table, file = 'peakSym_table.txt',
+write.table( peakSym_table, file = 'Output/peakSym_table.txt',
              quote = F, sep = '\t', dec = '.', row.names = F )
 
 

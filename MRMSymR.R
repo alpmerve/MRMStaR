@@ -87,7 +87,7 @@ peakSym_table      <- data %>%
 ## Calculate average symmetry score and std across transitions from same precursor
 
 
-peakSym_table     <- peakSym %>% 
+peakSym_table     <- peakSym_table %>% 
                      group_by(Protein.Name, 
                               Peptide.Modified.Sequence, 
                               Isotope.Label.Type, 

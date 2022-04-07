@@ -1,30 +1,11 @@
-## ---------------------------
-##
-## Script name: MRMStaR/MRMnormalizeR
-##
-## Purpose of script: MRM data second level normalization and group comparison
-##
-## Author: Merve Alp
-##
-## Date Created: 2020-09-13
-##
-## Email: kezibanmerve.alp@mdc-berlin.de
-##
-## ---------------------------
-##
-## Notes: 
-##   
-##
-## ---------------------------
+###R studio version 1.3.1093
+###R version 4.0.3 (2020-10-10) "Bunny-Wunnies Freak Out"
 
-## set working directory 
+rm(list=ls())
 
-setwd(choose.dir()) 
-
-## install and import required packages
-
-pacman::p_load("pheatmap", 
-               "RColorBrewer", 
+#installing and importing required packages
+if   (!require("pacman")) install.packages("pacman")
+pacman::p_load("RColorBrewer", 
                "ggplot2",
                "grid", 
                "gridExtra",
@@ -37,8 +18,6 @@ pacman::p_load("pheatmap",
                "data.table",
                "purrr")
 
-
-
 library(ggplot2)
 library(dplyr)
 library(tidyr)
@@ -50,119 +29,108 @@ library(gridExtra)
 library(miscset)
 library(tibble)
 library(gplots)
-library(corrplot)
 library(RColorBrewer)
-library(ggsci)
-library(ggpubr)
 library(data.table)
 library(purrr)
 
-## Import input files
+#setting working directory --> where the input csv file is
+#setwd("~/Desktop/Projects/Other projects/Glycoproject/") #Provide the path to the working directory 
+#setwd(choose.dir()) #Interactively navigate to the working directory 
 
-data              <- read.csv(file= "Input/Input_Group_Comparison_Normalization.csv", 
-                              header = TRUE, 
-                              sep = ",", 
+#Importing csv file and modifying column names; Adjust the csv file name
+data              <- read.csv(file= "Control_MRMNormalizeR.csv", 
+                              header=TRUE, 
+                              sep=",", 
                               stringsAsFactors = F, 
-                              as.is = T,
+                              as.is = T, 
                               na.strings = 'NA')
 
-annotation.list   <- read.delim("Input/Annotation_Paper_woClass.txt", stringsAsFactors = F)
-class.ann.list    <- read.delim("Input/Annotation_Paper.txt", stringsAsFactors = F)
-
-## Modify column names of data for convenience
-
-data$Replicate.Name    <- gsub(pattern = "^[^_]*_", replacement = "",data$Replicate.Name)###removes the date from the beginning of the names, optional
-data$Replicate.Name    <- gsub(pattern = "_", replacement = ".",data$Replicate.Name)###optional
 data$Condition         <- gsub(pattern = "_", replacement = ".",data$Condition)
 data$Protein.Name      <- gsub(pattern = "^.*\\|", replacement = "", data$Protein.Name)###should be  modified depending on how protein name look like
+class.ann.list         <- read.delim("Annotation.txt", stringsAsFactors = F)
+#dim(data)
+
+#Filtering data and sum up all areas available for each protein in each measurement (Total Area)
+filtered.data <-   data %>%  
+              filter(Truncated != "" & Quantitative == "True" & Standard.Type != "iRT") %>% #use if you want to keep quantitative but truncated areas
+              #filter(Truncated != "" & Quantitative == "True" & Standard.Type != "iRT") %>%   #use if you want to get rid of quantitative but truncated areas
+              select(-c(Truncated, Quantitative, Standard.Type))  %>%
+              group_by(Protein.Name, Replicate.Name, Condition, TechReplicate, Isotope.Label.Type) %>%
+              summarise(Total.Area = sum(as.numeric(Area, na.rm = TRUE)))
 
 
-## Filter truncated, non-quantitave and iRT transitions
 
-data <- data %>%  
-        filter(Truncated == "False" & Quantitative == "True" &  Standard.Type != "iRT") %>%
-        select(-c(Truncated, Quantitative, Standard.Type))
+#dim(filtered.data)
+#log transformation    
+filtered.data$Total.Area <- log2(filtered.data$Total.Area)
 
-## Sum up all areas available for each protein in each wiff file (Total Area)
-        
-data <- data %>%        
-        group_by(Protein.Name, Replicate.Name, Condition, BioReplicate, Isotope.Label.Type) %>%
-        summarise(Total.Area = sum(as.numeric(Area, na.rm = TRUE)))
 
-## Log transformation    
-
-data$Total.Area <- log2(data$Total.Area)
-
-## Calculate light to heavy ratios
-
-data <- data %>% 
-        dcast(Protein.Name + Replicate.Name + Condition + BioReplicate ~ Isotope.Label.Type, 
+#calculating light to heavy ratios
+ratios.data <-   filtered.data %>% 
+              reshape2::dcast(Protein.Name + Replicate.Name + Condition + TechReplicate ~ Isotope.Label.Type, 
               value.var = "Total.Area", 
               fill = 0) %>%
-        mutate(Ratio = light - heavy) %>%
-        select(Protein.Name, Replicate.Name, Condition, BioReplicate, Ratio)
+              mutate(Ratio = light - heavy) %>%
+              select(Protein.Name, Replicate.Name, Condition, TechReplicate, Ratio)
 
-## Normalize against houskeeping protein
 
-data <- data %>% 
-        dcast(Replicate.Name + Condition + BioReplicate ~ Protein.Name, 
+#dim(ratios.data)
+
+#normalizing against housekeeping / reference protein
+wide.data <-  ratios.data %>% 
+              reshape2::dcast(Replicate.Name + Condition + TechReplicate ~ Protein.Name, 
               value.var = "Ratio", 
               fill = 0) 
 
-select          <- grep("_HUMAN", names(data)) ## selecting only columns with protein values
-#select         <- data[,-1:-2]  ## if your protein names do not have _HUMAN, continue with this select command
+select          <- colnames(wide.data[,-1:-3]) #To artificially get rid of first three columns 
 
-ctrl            <- "SEC63_HUMAN"
-data[, select]  <- data[,select] - data[, ctrl]
+# write.table(wide.data, file = 'Randomname.txt',
+#              quote = F, sep = '\t', dec = ',', row.names = F )
 
+wide.data[, select]  <- wide.data[,select] - wide.data[,"SEC63_HUMAN"] #second normalization step with reference protein Sec63 in that example
+data.normalized <- data.frame(Replicate.Name = wide.data$Replicate.Name, 
+                              Condition = wide.data$Condition, 
+                              Technical.Rep = wide.data$TechReplicate,
+                              wide.data[,select])
 
-## Create a new data frame with normalized values
+# write.table(data.normalized, file = 'Randomname.txt',
+#             quote = F, sep = '\t', dec = ',', row.names = F )
 
-data.normalized <- data.frame(Replicate.Name = data$Replicate.Name, 
-                              Condition = data$Condition, 
-                              Technical.Rep = data$BioReplicate, 
-                              data[,select])
+#Extract replicate number from file name and make a new column Replicate, necessary to work for possible technical replicates annotation, otherwise just run regardless of what gets extracted 
+data.normalized$Replicate <- str_extract(data.normalized$Replicate.Name, pattern = "[0-9]")
+#data.normalized$Condition <- gsub(pattern = ".*\\.", replacement = "", data.normalized$Condition) #optional
 
-## Extract replicate number from file name (Replicate.Name) and condition name from Condition columns respectively
-
-data.normalized$Replicate <- str_extract(data.normalized$Replicate.Name, pattern = "R[0-9]")
-data.normalized$Condition <- gsub(pattern = ".*\\.", replacement = "", data.normalized$Condition)
-
-## Order conditions in a specific order in a way that control condition is the first one   --> needed for group comparison
-
-order <- c("Hek293T", "HeLa", "Fibroblasts")
-
-## Wrangle data in order to combine technical replicates by averaging if there is any 
-## Split each condition 
+#ordering conditions in a specific order   --> needed for group comparison, control condition must be put in first!!
+order <- c("Control", "HeLa","Fibroblasts")
 
 data.normalized <- data.normalized %>% 
                    gather(key = Protein.Name, 
-                          value = Log2Ratio, 
-                          -c(Replicate.Name, Condition, Replicate, Technical.Rep)) %>%
-                   group_by(Protein.Name, Replicate, Condition, Technical.Rep) %>%  ###Tech rep. part
-                   summarise(Replicate.Name = first(Replicate.Name), Log2Ratio = mean(Log2Ratio)) %>%
-                   ungroup() %>%
+                   value = Log2Ratio, 
+                   -c(Replicate.Name, Condition, Replicate, Technical.Rep)) %>%
+  #group_by(Protein.Name, Replicate, Condition, Technical.Rep) %>%  ###Tech rep. part, needs testing, use at own risk for now J
+  #summarise(Replicate.Name = first(Replicate.Name), Log2Ratio = mean(Log2Ratio)) %>%
+  #ungroup() %>%
                    mutate_at(vars(Condition), 
-                             funs(factor)) %>% 
-                   mutate(Condition = factor(Condition, levels = order))  %>% 
-                   group_split(Condition)
+                   list(factor)) %>% 
+                   mutate(Condition = factor(Condition, levels = order))  %>% #factor makes it to preserve the order, not the string alphabetical one 
+                   group_split(Condition) #previous data frame is now a tibble, one data frame per condition
 
 
-## Linear regression 
-
-control <- data.normalized[[1]]   
+##linear regression 
+control <- data.normalized[[1]]   ### according to order which is defined above, only control condition data inside
 
 coef.list <- list()
 dof.list  <- list()
-
-## Start with 2 to eliminate control to control comparison
-
+##starts with 2 to eliminate control to control comparison, 
+##therefore it is important to have the first  condition as control (see above)
 for (i in 2:length(order)){ 
         
-        control.condition <- rbind(control, data.normalized[[i]])
+        control.condition <- rbind(control, data.normalized[[i]]) #combines control data with data from other Conditions, pairwise
         fitted.models     <- control.condition %>% 
                              group_by(Protein.Name) %>% 
-                             do(model = lm(Log2Ratio ~ Condition, data = .)) 
+                             do(model = lm(Log2Ratio ~ Condition, data = .)) #linear regression
+
+#Now, results from linear regression for pairwise comparisons must be stored in lists, as they would otherwise be overwritten by the next comparison        
         
         coef.list[[i]]    <- fitted.models %>% 
                              ungroup %>% 
@@ -174,194 +142,180 @@ for (i in 2:length(order)){
         dof.list[[i]]     <- fitted.models %>% 
                              ungroup %>% 
                              transmute(Protein.Name, Dof = map(model, glance)) %>% 
-                             unnest(Dof)              
+                             unnest(Dof)                  
 }
 
-## Store results of linear regression out of a tibble in df
-
+##preparation for storing results of linear regression
 fc.results       <- data.frame(Protein.Name = unique(coef.list[[ i ]]$Protein.Name), stringsAsFactors=FALSE)
 adj.pval.results <- data.frame(Protein.Name = unique(coef.list[[ i ]]$Protein.Name), stringsAsFactors=FALSE)
 pval.results     <- data.frame(Protein.Name = unique(coef.list[[ i ]]$Protein.Name), stringsAsFactors=FALSE)
 conf.int.results <- data.frame(Protein.Name = unique(coef.list[[ i ]]$Protein.Name), stringsAsFactors=FALSE)
 sig.results      <- data.frame(Protein.Name = unique(coef.list[[ i ]]$Protein.Name), stringsAsFactors=FALSE)
-
-## Combine protein values from different comparisons in one dataframe
-
+#barplots         <- list()
+# combining protein values from different comparisons in one dataframe
 for (i in 2:length(order)){
         
         if( is.null( coef.list[[i]] ) ){next()}
-        
+#writing results from the linear regression back from lists to data frames       
         coef.table             <-  coef.list[[i]]
         dof.table              <-  dof.list[[i]]
-        coef.table$adj.p.value <-  p.adjust(coef.table$p.value, method = "BH", n = length(coef.table$p.value))
-        coef.table$sig         <-  ifelse(coef.table$adj.p.value <= 0.05, "*", "")
         
-        coef.all            <-  data.frame(cbind(coef.table[paste0("Condition", order[i])],
+        coef.all               <-  data.frame(cbind(coef.table[paste0("Condition", order[i])],
                                                  coef.table["std.error"] ,
-                                                 coef.table["adj.p.value"],
-                                                 coef.table["p.value"],
-                                                 coef.table["sig"]))
+                                                 coef.table["p.value"]))
         
         coef.all            <-  subset(coef.all, is.na(coef.all[paste0("Condition", order[i])]) == FALSE) 
         row.names(coef.all) <-  unique(coef.table$Protein.Name)
         
+        #Performing the BH correction
+        coef.all$adj.p.value <-  p.adjust(coef.all$p.value, method = "BH", n = length(coef.all$p.value))
+        coef.all$sig         <-  ifelse(coef.all$adj.p.value <= 0.05, "+", "-")
+        
+        #populating separate data frames
         fc.results[paste("log2FC", order[i], sep = ".")]          <-  coef.all[,paste0("Condition", order[i])]
         adj.pval.results[paste("adj.p.val", order[i], sep = ".")] <-  coef.all[,"adj.p.value"]
         pval.results[paste("p.val", order[i], sep = ".")]         <-  coef.all[,"p.value"]
-        conf.int.results[paste("conf.int", order[i], sep = ".")]  <-  coef.all[,"std.error"]*qt(.975, as.numeric(unique(dof.table["df.residual"])))
+        conf.int.results[paste("conf.int", order[i], sep = ".")]  <-  coef.all[,"std.error"]*qt(.975, as.numeric(unique(dof.table["df.residual"]))) #calculating 95 % confidence intervals
         sig.results[paste("is.sign", order[i], sep = ".")]        <-  coef.all[,"sig"]
 }
 
 
-results              <- Reduce(merge, list(fc.results, adj.pval.results, pval.results, sig.results, conf.int.results ))
-#results             <- results[!(results$Protein.Name=="SEC63_HUMAN"),] ##removing SEC63 from the results
-results$Protein.Name <- gsub(pattern = "\\_.*", replacement = "", results$Protein.Name)
-results              <- results[ order(match(results$Protein.Name, annotation.list$Protein.Name)), ]
+results     <- Reduce(merge, list(fc.results, adj.pval.results, pval.results, sig.results, conf.int.results ))
+results     <- results[!(results$Protein.Name=="SEC63_HUMAN"),] ##removing SEC63 from the results
 
-## Export Log2FC, Adj-p value and CI results in txt file
-
-write.table( results, file = 'Output/Stat_results.txt',
-             quote = F, sep = '\t', dec = '.', row.names = F ) 
+#exporting Log2FC, Adj-p value and CI results in txt file
+write.table( results, file = '22.02.07_Result.txt',
+             quote = F, sep = '\t', dec = ',', row.names = F )
 
 
-## ---------------------------
-##
-## Visualization with plots
-##   
-##
-## ---------------------------
-
-## Convert necessary columns to matrix for heatmap
-
-data.matrix              <-  as.matrix(results[,grep("log2FC.", names(results))])
-row.names(data.matrix)   <-  gsub(pattern = "\\_.*", replacement = "", results$Protein.Name) 
-colnames(data.matrix)    <-  gsub(pattern = ".*\\.", replacement = "", colnames(data.matrix))
-
-## Row annotation
-
-group.ann            <- as.matrix(row.names(data.matrix))
-colnames(group.ann)  <- "id" 
-group.ann            <- merge(group.ann, class.ann.list, by.x = "id", by.y = "Protein.name", all.x = F) 
-group.ann            <- group.ann %>% 
-                        column_to_rownames(var="id")
-
-
-## Heat map
-
-paletteLength <- 100
-breaks        <- c(seq(-5, 0, length.out=ceiling(paletteLength/2)-1 ), 
-                   seq(2/paletteLength, 5, length.out=floor(paletteLength/2)))
-
-
-plot.hm <- pheatmap(
-        data.matrix,
-        main              = "Comparison_to_control",
-        color             = colorRampPalette(c("blue","white","red"))(paletteLength),
-        breaks            = breaks,
-        annotation_row    = group.ann,
-        cluster_rows      = T,
-        cluster_cols      = F,
-        show_colnames     = T,
-        show_rownames     = T,
-        fontsize_row      = 11, 
-        cellwidth         = 15,
-        cellheight        = 15,
-        treeheight_row    = 20,
-        treeheight_col    = 20
-)
-
-
-save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
-        stopifnot(!missing(x))
-        stopifnot(!missing(filename))
-        pdf(filename, width=width, height=height)
-        grid::grid.newpage()
-        grid::grid.draw(x$gtable)
-        dev.off()
-}
-save_pheatmap_pdf(plot.hm, "Output/Heatmap.pdf")
-
-## Barplots with log2FC and 95% CI as error bars for individual proteins across all conditions
-## in single pdfs which are saved in working directory
+#############################################################################################
+##barplots with log2FC and 95% CI as error bars for individual proteins across all conditions
+##in single pdfs which are saved in working directory
 
 plot <- list()
+results$Protein.Name <- gsub(pattern = "\\_.*", replacement = "", results$Protein.Name)
+
 protein.bar.plot <- function(data, condition, value, class, errbar, pn){
         ggplot(data, aes(x = condition, y= value, fill = class)) + 
-                geom_bar(stat = "identity", 
-                         color = "black",
-                         position = position_dodge())  +
-                geom_errorbar(aes(ymin = value - errbar, 
-                                  ymax = value + errbar), 
-                              width = .2,
-                              position = position_dodge(.9))+
-                geom_hline(yintercept = 0) +
-                theme_bw() +
-                theme(axis.line.x = element_blank()) +
-                scale_fill_jco()+
-                #ylim(-2, 2)+
-                labs(  fill = "adj p-value <= 0.05",
-                       x = "Condition", 
-                       y = "Log2FC") +
-                ggtitle(pn)
+        geom_bar(stat = "identity", 
+                 color = "black",
+                 position = position_dodge())  +
+        geom_errorbar(aes(ymin = value - errbar, 
+                          ymax = value + errbar), 
+                      width = .2,
+                      position = position_dodge(.9))+
+        geom_hline(yintercept = 0) +
+        theme_bw() +
+        theme(axis.line.x = element_blank()) +
+        scale_fill_jco()+
+        #ylim(-2, 2)+
+        labs(  fill = "adj p-value <= 0.05",
+               x = "Condition", 
+               y = "Log2FC") +
+        ggtitle(pn)
 }
 
 protein.list <- unique(results$Protein.Name)
 for (p in protein.list){
         
-        
+  
         protein.results      <- results[results$Protein.Name == p,]
-        dm                   <- melt( protein.results, id.vars = "Protein.Name")
+        dm                   <- reshape2::melt( protein.results, id.vars = "Protein.Name")
         dm$condition         <- gsub(pattern = ".*\\.", replacement = "", dm$variable)
         dm$variable          <- gsub(pattern = "\\..*", replacement = "", dm$variable)
         dm                   <- spread(dm, key = "variable", value = "value")
         dm$log2FC            <- as.numeric(as.character(dm$log2FC))
         dm$conf              <- as.numeric(as.character(dm$conf))
         dm$condition         <- factor(dm$condition,
-                                       levels = order) 
+                                       levels = c("Control", "HeLa", "Fibroblasts")) #order does not matter here
         
-        
+  
         plot[[p]]  <- protein.bar.plot(data     = dm, 
                                        condition= dm$condition, 
                                        value    = dm$log2FC,
                                        class    = dm$is,
                                        errbar   = dm$conf, 
                                        pn       = p)
-        
-        
-        pdf(sprintf("Output/%s.pdf", p),
-            width = 6, height = 4, onefile = T)
-        plot(plot[[p]])
+
+
+        pdf(sprintf("%s.pdf", p),
+             width = 6, height = 4, onefile = T)
+             plot(plot[[p]])
         dev.off()
         
 }
 
-## Barplots with log2FC and 95% CI as error bars with all proteins per condition as separate single pdfs
+##################################################################################################
+##barplots with log2FC and 95% CI as error bars with all proteins per condition as separate single pdfs
 
 p = list()
-#results <- results[ order(match(results$Protein.Name, annotation.list$Protein.Name)), ]
-plot_data_column = function (data, variable, value, class, errbar){
+results$Protein.Name <- gsub(pattern = "\\_.*", replacement = "", results$Protein.Name) #getting rid of "_HUMAN"
+results              <- results[ order(match(results$Protein.Name, class.ann.list$Protein.Name)), ] #custom protein order 
+results$Class        <- class.ann.list[ match(results$Protein.Name, class.ann.list$Protein.Name), "Class" ] 
+my_colors            <- c('#b2abd2', '#e66101', '#fdb863', '#5e3c99' )
+plot_data_column = function (data, variable, value, sign, class, errbar){
         ggplot(data = data, 
                aes(x = variable, 
-                   y = value, 
-                   fill = class)) +
-                geom_bar(stat     = "identity", 
-                         color    = "black",
-                         position = position_dodge()) +
-                scale_fill_manual(values = c('#999999','#E69F00')) + 
+                   y = value,
+                   fill = factor(class))) +
+                geom_bar(stat  = "identity", 
+                         color = "black",
+                         width = .8, 
+                         position = position_identity()) +
+                scale_fill_manual(values  = my_colors) + 
+                scale_x_discrete(limits = c(levels(variable)[1:table(class)[1]], "ABC",
+                                            levels(variable)[(1+table(class)[1]):(table(class)[1]+table(class)[2])], "DEF",
+                                            levels(variable)[(1+table(class)[1]+table(class)[2]):(table(class)[1]+table(class)[2]+table(class)[3])], "KLM",
+                                            levels(variable)[(1+table(class)[1]+table(class)[2]+table(class)[3]):length(variable)]),
+                     labels = c("ABC" = "",
+                                "DEF" = "", 
+                                "KLM" = ""))+
+                scale_y_continuous(breaks = seq(-ceiling(max(abs(value))) - 2, 
+                                                 ceiling(max(abs(value))) + 2, 
+                                                by = 1),
+                                   limits = c(-ceiling(max(abs(value))) - 2, 
+                                               ceiling(max(abs(value))) + 2)) +
                 geom_errorbar(aes(ymin = value - errbar, 
                                   ymax = value + errbar), 
-                              width    = .2,
+                              width = .2,
                               position = position_dodge(.9)) +
-                geom_hline(yintercept  = 0) +
+                geom_hline(yintercept = 0) +
+                geom_hline(yintercept =  1, linetype = 2) +
+                geom_hline(yintercept = -1, linetype = 2) +
+                geom_text(aes(label = ifelse(sign == "+", "*", "")), 
+                          nudge_y = ifelse(value <0, -(errbar + 0.5), errbar + 0.5),
+                          vjust = 1) +
                 theme_bw() + 
-                theme(axis.line.x = element_blank(), 
-                      axis.text.x = element_text(angle = 60, hjust = 1)) +
-                #ylim(-10, 10) +
-                labs(title = order[i],
-                     fill  = "adj p-value <= 0.05",
-                     x     = "Protein name", 
-                     y     = "Log2FC") 
+                theme(plot.title = element_text(face = "bold",
+                                                size = rel(1), hjust = 0),
+                      text = element_text(),
+                      panel.background = element_rect(colour = NA),
+                      plot.background  = element_rect(colour = NA),
+                      panel.border     = element_rect(colour = NA),
+                      axis.title       = element_text(face = "bold", size = rel(1)),
+                      axis.title.y     = element_text(angle = 90, vjust = 2),
+                      axis.title.x     = element_text(vjust = -.2),
+                      axis.text        = element_text(), 
+                      axis.text.x      = element_text(angle = 60, face = "bold", vjust = 1, hjust = 1),
+                      axis.line        = element_line(colour = "black"),
+                      axis.ticks       = element_line(),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      legend.key       = element_rect(colour = NA),
+                      legend.position  = c(.8,.9),
+                      legend.direction = "vertical",
+                      legend.key.size  = unit(.4, "cm"),
+                      legend.spacing   = unit(0, "cm"),
+                      legend.title     = element_blank(),
+                      plot.margin      = unit(c(10,5,5,5),"mm"),
+                      strip.background = element_rect(colour = "#f0f0f0",fill = "#f0f0f0"),
+                      strip.text       = element_text(face="bold")) +
+                labs(title = paste0("Log2FC \n",order[i], " / HEK 293T"),
+                     fill = "Class",
+                     x = "", 
+                     y = "")
 }
+
 
 
 
@@ -371,120 +325,18 @@ for (i in 2:length(order)){
         Log2FCs       <- results[,paste0("log2FC", sep = ".", order[i])]
         significance  <- results[,paste0("is.sign", sep = ".", order[i])]
         confIntervals <- results[,paste0("conf.int", sep = ".", order[i])]
+        class         <- factor(results$Class, levels=unique(results$Class))
         
         p[[i]]  <- plot_data_column(data     = results, 
                                     variable = proteinNames, 
                                     value    = Log2FCs,
-                                    class    = significance,
+                                    sign     = significance ,
+                                    class    = class,
                                     errbar   = confIntervals)
         
-        pdf(sprintf("Output/plot_%s.pdf", order[i]),
-            width = 6, height = 4, onefile = T)
+        pdf(sprintf("plot_%s.pdf", order[i]),
+            width = 4, height = 5, onefile = T)
         plot(p[[i]])
         dev.off()
 }
-
-
-
-## Barplots with log2FC and 95% CI as error bars with all proteins per condition in one page pdf
-
-dm              <- melt(results, id.vars = "Protein.Name")
-#dm             <- dm[order(match(dm$Protein.Name, annotation.list$Protein.Name)),]
-dm$condition    <- gsub(pattern = ".*\\.", replacement = "", dm$variable)
-dm$variable     <- gsub(pattern = "\\..*", replacement = "", dm$variable)
-dm              <- spread(dm, key = "variable", value = "value")
-dm              <- dm[order(match(dm$Protein.Name, annotation.list$Protein.Name)),]
-dm$log2FC       <- as.numeric(as.character(dm$log2FC))
-dm$conf         <- as.numeric(as.character(dm$conf))
-dm$condition    <- factor(dm$condition,
-                          levels = order)
-dm$Protein.Name <- factor(dm$Protein.Name, 
-                          levels =  unique(dm$Protein.Name))
-
-conditon_plot <- ggplot(dm, aes(x = Protein.Name, y = log2FC, fill = is)) + 
-                        geom_bar(stat     = "identity", 
-                                 color    = "black",
-                                 position = position_dodge())  +
-                        geom_errorbar(aes(ymin = log2FC - conf, 
-                                 ymax = log2FC + conf), 
-                                 width    = .4,
-                                 position = position_dodge(.9))+
-                        geom_hline(yintercept  = 0) +
-                        scale_fill_jco()+
-                        theme_bw() +
-                        theme(axis.text.x     = element_text(angle = 90, hjust = 0.5, size = 6),
-                              axis.line.x     = element_blank(),
-                              legend.title    = element_text(size = 9),
-                              legend.key.size = unit(0.2, "cm"), 
-                              plot.title      = element_text(hjust = 0.5, size = 12 )) +
-                        #ylim(-4, 6.5) + 
-                        labs(  title = "Cell_Line_Comparisons",
-                               fill  = "adj p-value \n<= 0.05",
-                               x     = "Proteins", 
-                               y     = "Log2FC")+
-                        facet_wrap(~ condition, ncol=2) 
-
-pdf("Output/Proteins in all conditions.pdf",
-    width = 6, height = 4, onefile = T)
-plot(conditon_plot)
-dev.off()
-
-## Barplots with log2FC and 95% CI as error bars with all proteins grouped 
-
-
-offset_asterisk <- .2
-
-theme_ms <- function(base_size=12, base_family="Helvetica") {
-                (theme_bw(base_size   = base_size, 
-                          base_family = base_family)+
-                 theme(text              = element_text(color = "black"),
-                       axis.title        = element_text(face  = "bold", 
-                                                        size  = rel(1.3)),
-                       axis.text         = element_text(size  = rel(1), 
-                                                        color = "black"),
-                       legend.title      = element_text(face  = "bold"),
-                       legend.text       = element_text(face  = "bold"),
-                       legend.background = element_rect(fill  = "transparent"),
-                       legend.key.size   = unit(0.8, 'lines'),
-                       panel.border      = element_rect(color = "black",
-                                                        size  = 1),
-                       panel.grid        = element_blank()
-                 ))
-}
-
-plot <- ggplot(dm, aes(x = Protein.Name, y = log2FC, fill = condition)) + 
-        geom_bar(stat     = "identity", 
-                 color    = "black",
-                 width    = .7,
-                 position = position_dodge(.7) )  +
-        geom_errorbar(aes(ymin = log2FC - conf, 
-                          ymax = log2FC + conf), 
-                      width    = .3,
-                      position = position_dodge(.7))+
-        geom_hline(yintercept  = 0) +
-        geom_text( aes(y = ifelse(log2FC > 0, (log2FC + conf) + offset_asterisk, (log2FC - conf ) - offset_asterisk), label = is),
-                   colour ="black",
-                   vjust = 0,
-                   position = position_dodge(width= .7),
-                   #hjust = .75,
-                   size = 5)+
-        scale_fill_jco()+
-        theme_ms() +
-        theme(axis.text.x     = element_text(angle = 0, hjust = .5, size = 8),
-              axis.line.x     = element_blank(),
-              legend.title    = element_text(size = 9),
-              legend.key.size = unit(0.2, "cm")) +
-        # ylim(-3, 5) +
-        labs(  fill  = "Cell lines",
-               x     = "Proteins", 
-               y     = "Log2FC")
-
-
-pdf("Output/Group comparison in one plot with significance asterisk.pdf",
-    width = 15, height = 10, onefile = T)
-plot(plot)
-dev.off()
-
-
-
 

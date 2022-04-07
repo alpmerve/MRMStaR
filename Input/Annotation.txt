@@ -1,0 +1,31 @@
+Protein.Name	Class
+DPM1	Dolichol synthesis
+DPM3	Dolichol synthesis
+ALG7	N-glycosylation
+ALG13	N-glycosylation
+ALG14	N-glycosylation
+ALG1	N-glycosylation
+ALG2	N-glycosylation
+ALG11	N-glycosylation
+RFT1	N-glycosylation
+ALG3	N-glycosylation
+ALG9	N-glycosylation
+ALG12	N-glycosylation
+ALG5	N-glycosylation
+ALG6	N-glycosylation
+ALG8	N-glycosylation
+ALG10	N-glycosylation
+RPN1	N-glycosylation
+STT3A	N-glycosylation
+STT3B	N-glycosylation
+POMT1	O-mannosylation
+POMT2	O-mannosylation
+TMTC1	O-mannosylation
+TMTC2	O-mannosylation
+TMTC3	O-mannosylation
+TMTC4	O-mannosylation
+DPY19L1	C-mannosylation
+DPY19L3	C-mannosylation
+DPY19L4	C-mannosylation
+SEC61a1	Housekeeping
+SEC63	Housekeeping
